@@ -13,6 +13,7 @@ import numpy as np
 import time
 from numpy.linalg import inv
 
+
 def down_conv_layer(input_channels, output_channels, kernel_size):
     return nn.Sequential(
         nn.Conv2d(
@@ -34,6 +35,7 @@ def down_conv_layer(input_channels, output_channels, kernel_size):
    nn.BatchNorm2d(output_channels),
    nn.ReLU())
 
+
 def conv_layer(input_channels, output_channels, kernel_size):
     return nn.Sequential(
         nn.Conv2d(
@@ -45,9 +47,11 @@ def conv_layer(input_channels, output_channels, kernel_size):
   nn.BatchNorm2d(output_channels),
         nn.ReLU())
 
+
 def depth_layer(input_channels):
     return nn.Sequential(
         nn.Conv2d(input_channels, 1, 3, padding=1), nn.Sigmoid())
+
 
 def refine_layer(input_channels):
     return nn.Conv2d(input_channels, 1, 3, padding=1)
@@ -63,6 +67,13 @@ def up_conv_layer(input_channels, output_channels, kernel_size):
             bias=False),
   nn.BatchNorm2d(output_channels),
         nn.ReLU())
+
+
+def print_error(warp_uv, transform):
+    warp_np = warp_uv.cpu().data.numpy()
+    print(warp_np.shape)
+    print(transform.shape)
+    print(warp_np[np.where(warp_np != warp_np)])
 
 def get_trainable_number(variable):
     num = 1
@@ -130,6 +141,7 @@ class depthNet(nn.Module):
                 if m.bias is not None:
                     init.constant(m.bias, 0)
                     total_num += get_trainable_number(m.bias)
+        print("model has %d trainable variables"%total_num)
 
     def getVolume(self, left_image, right_image, KRKiUV_T, KT_T):
 
@@ -150,8 +162,11 @@ class depthNet(nn.Module):
         for depth_i in range(64):
             this_depth = 1.0 / (idepth_base + depth_i * idepth_step)
             transformed = KRKiUV_T * this_depth + KT_T
-            demon = transformed[:, 2, :].unsqueeze(1)  #shape = batch x 1 x 81920
-            warp_uv = transformed[:, 0: 2, :] / (demon + 1e-6)
+            demon = transformed[:, 2, :].unsqueeze(
+                1)  #shape = batch x 1 x 81920
+            demon[demon == 0] = 1e-5
+            warp_uv = transformed[:, 0:
+                                  2, :] / demon  #shape = batch x 2 x 81920
             warp_uv = (warp_uv - normalize_base) / normalize_base
             warp_uv = warp_uv.view(
                 batch_number, 2, image_width,
@@ -166,8 +181,8 @@ class depthNet(nn.Module):
         return costvolume
 
     def forward(self, left_image, right_image, KRKiUV_T, KT_T):
-        plane_sweep_volume = self.getVolume(left_image, right_image, KRKiUV_T, KT_T)
-        # left_image *= 0.0
+        plane_sweep_volume = self.getVolume(left_image, right_image, KRKiUV_T,
+                                            KT_T)
         x = torch.cat((left_image, plane_sweep_volume), 1)
 
         conv1 = self.conv1(x)
@@ -196,6 +211,7 @@ class depthNet(nn.Module):
 
         upconv1 = self.upconv1(iconv2)
         iconv1 = self.iconv1(torch.cat((upconv1, udisp2), 1))
+        # print((iconv1 != iconv1).any())
         disp1 = 2.0 * self.disp1(iconv1)
 
         return [disp1, disp2, disp3, disp4]
